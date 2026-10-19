@@ -1,79 +1,161 @@
+
 package com.careerly.service;
 
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.URI;
 import java.time.Duration;
 
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiService {
+
     private final HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(20)).build();
+            .connectTimeout(Duration.ofSeconds(20))
+            .build();
 
     public String ask(String prompt) {
-        String apiKey = System.getenv("OPENAI_API_KEY");
+        String apiKey = System.getenv("GEMINI_API_KEY");
+
         if (apiKey == null || apiKey.isBlank()) {
-            return "AI is not configured yet. Set the OPENAI_API_KEY environment variable, restart the backend, and try again. Your request was received: " + prompt;
+            return "Gemini API key is missing. Add GEMINI_API_KEY in Render backend Environment settings.";
         }
 
         String safePrompt = prompt == null ? "" : prompt;
+
         String body = """
             {
-              "model": "gpt-4.1-mini",
-              "messages": [
-                {"role":"system","content":"You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly advice. Do not invent credentials, job openings, or resume facts."},
-                {"role":"user","content":%s}
-              ],
-              "temperature":0.4
+              "systemInstruction": {
+                "parts": [{
+                  "text": "You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly advice. Help with software engineering placements, Java, DSA, resumes, interviews, and career roadmaps. Do not invent credentials, job openings, or resume facts."
+                }]
+              },
+              "contents": [{
+                "parts": [{
+                  "text": %s
+                }]
+              }],
+              "generationConfig": {
+                "temperature": 0.4,
+                "maxOutputTokens": 1200
+              }
             }
             """.formatted(jsonString(safePrompt));
 
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.openai.com/v1/chat/completions"))
+                    .uri(URI.create(
+                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+                    ))
                     .timeout(Duration.ofSeconds(60))
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header("x-goog-api-key", apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            HttpResponse<String> response = client.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString()
+            );
+
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                return "AI provider returned HTTP " + response.statusCode() + ". Check your API key, account access, and billing.";
+                System.err.println("Gemini API HTTP " + response.statusCode()
+                        + ": " + response.body());
+
+                return "Gemini API error (HTTP " + response.statusCode()
+                        + "). Check Render logs, API key, model access, and usage limits.";
             }
-            return extractContent(response.body());
+
+            String answer = extractText(response.body());
+
+            if (answer.isBlank()) {
+                return "Gemini returned an empty response. Please try again.";
+            }
+
+            return answer;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "The AI request was interrupted. Please try again.";
         } catch (Exception e) {
-            return "Could not reach the AI service. Check your internet connection and API configuration.";
+            System.err.println("Gemini request failed: " + e.getMessage());
+            return "Could not reach Gemini AI. Please check the backend logs.";
         }
     }
 
     private String jsonString(String value) {
-        String escaped = value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-        return "\"" + escaped + "\"";
+        StringBuilder out = new StringBuilder("\"");
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+
+        return out.append('"').toString();
     }
 
-    // Small JSON response extractor for the expected chat-completions response.
-    // For production, replace this with Jackson DTOs and structured error handling.
-    private String extractContent(String json) {
-        String marker = "\"content\":\"";
-        int start = json.indexOf(marker);
-        if (start < 0) return "AI response received, but the response format could not be read.";
-        start += marker.length();
+    private String extractText(String json) {
+        String marker = "\"text\"";
+        int position = json.indexOf("\"candidates\"");
+        if (position < 0) return "";
+
+        int end = json.indexOf("\"finishReason\"", position);
+        if (end < 0) end = json.length();
+
+        String candidate = json.substring(position, end);
+        int markerPosition = candidate.indexOf(marker);
+
+        if (markerPosition < 0) return "";
+
+        int colon = candidate.indexOf(':', markerPosition + marker.length());
+        if (colon < 0) return "";
+
+        int start = candidate.indexOf('"', colon + 1);
+        if (start < 0) return "";
+
         StringBuilder out = new StringBuilder();
         boolean escape = false;
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
+
+        for (int i = start + 1; i < candidate.length(); i++) {
+            char c = candidate.charAt(i);
+
             if (escape) {
                 switch (c) {
                     case 'n' -> out.append('\n');
                     case 'r' -> out.append('\r');
                     case 't' -> out.append('\t');
+                    case 'b' -> out.append('\b');
+                    case 'f' -> out.append('\f');
+                    case '"' -> out.append('"');
+                    case '\\' -> out.append('\\');
+                    case '/' -> out.append('/');
+                    case 'u' -> {
+                        if (i + 4 < candidate.length()) {
+                            try {
+                                out.append((char) Integer.parseInt(
+                                        candidate.substring(i + 1, i + 5), 16));
+                                i += 4;
+                            } catch (NumberFormatException e) {
+                                return "";
+                            }
+                        }
+                    }
                     default -> out.append(c);
                 }
                 escape = false;
@@ -85,6 +167,7 @@ public class AiService {
                 out.append(c);
             }
         }
+
         return out.toString();
     }
 }
