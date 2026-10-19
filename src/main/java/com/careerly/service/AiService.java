@@ -42,20 +42,34 @@ public class AiService {
                 }
                 """.formatted(jsonString(safePrompt));
 
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(
-                             String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
-                    .timeout(Duration.ofSeconds(60))
-                    .header("x-goog-api-key", apiKey)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
+        
+try {
+    String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 
-            HttpResponse<String> response = client.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString()
-            );
+    HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .header("x-goog-api-key", apiKey)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build();
+
+    HttpResponse<String> response = client.send(
+            request,
+            HttpResponse.BodyHandlers.ofString()
+    );
+
+    if (response.statusCode() < 200
+            || response.statusCode() >= 300) {
+        throw new RuntimeException(
+                "Gemini API error (HTTP "
+                        + response.statusCode() + "): "
+                        + response.body()
+        );
+    }
+
+    // Keep your existing response-processing code here.
+
 
             if (response.statusCode() < 200
                     || response.statusCode() >= 300) {
