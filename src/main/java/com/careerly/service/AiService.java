@@ -20,7 +20,7 @@ public class AiService {
         String apiKey = System.getenv("GEMINI_API_KEY");
 
         if (apiKey == null || apiKey.isBlank()) {
-            return "Gemini API key is missing. Add GEMINI_API_KEY in Render backend Environment settings.";
+            return "Gemini AI is not configured. Please set GEMINI_API_KEY in Render.";
         }
 
         String safePrompt = prompt == null ? "" : prompt;
@@ -29,7 +29,7 @@ public class AiService {
             {
               "systemInstruction": {
                 "parts": [{
-                  "text": "You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly advice. Help with software engineering placements, Java, DSA, resumes, interviews, and career roadmaps. Do not invent credentials, job openings, or resume facts."
+                  "text": "You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly career advice. Do not invent job openings or resume facts."
                 }]
               },
               "contents": [{
@@ -38,8 +38,7 @@ public class AiService {
                 }]
               }],
               "generationConfig": {
-                "temperature": 0.4,
-                "maxOutputTokens": 1200
+                "temperature": 0.4
               }
             }
             """.formatted(jsonString(safePrompt));
@@ -47,8 +46,7 @@ public class AiService {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(
-                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-                    ))
+                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
                     .timeout(Duration.ofSeconds(60))
                     .header("x-goog-api-key", apiKey)
                     .header("Content-Type", "application/json")
@@ -56,84 +54,54 @@ public class AiService {
                     .build();
 
             HttpResponse<String> response = client.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString()
-            );
+                    request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                System.err.println("Gemini API HTTP " + response.statusCode()
-                        + ": " + response.body());
-
-                return "Gemini API error (HTTP " + response.statusCode()
-                        + "). Check Render logs, API key, model access, and usage limits.";
+                return "Gemini AI error (HTTP " + response.statusCode()
+                        + "). Check your API key and Google AI Studio access.";
             }
 
-            String answer = extractText(response.body());
+            return extractText(response.body());
 
-            if (answer.isBlank()) {
-                return "Gemini returned an empty response. Please try again.";
-            }
-
-            return answer;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return "The AI request was interrupted. Please try again.";
         } catch (Exception e) {
-            System.err.println("Gemini request failed: " + e.getMessage());
-            return "Could not reach Gemini AI. Please check the backend logs.";
+            return "Could not connect to Gemini AI. Please try again.";
         }
     }
 
     private String jsonString(String value) {
-        StringBuilder out = new StringBuilder("\"");
-
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-
-            switch (c) {
-                case '"' -> out.append("\\\"");
-                case '\\' -> out.append("\\\\");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
-            }
-        }
-
-        return out.append('"').toString();
+        String escaped = value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+        return "\"" + escaped + "\"";
     }
 
     private String extractText(String json) {
-        String marker = "\"text\"";
-        int position = json.indexOf("\"candidates\"");
-        if (position < 0) return "";
+        String marker = "\"text\":";
+        int start = json.indexOf(marker);
 
-        int end = json.indexOf("\"finishReason\"", position);
-        if (end < 0) end = json.length();
+        if (start < 0) {
+            return "Gemini returned a response that could not be read.";
+        }
 
-        String candidate = json.substring(position, end);
-        int markerPosition = candidate.indexOf(marker);
+        start += marker.length();
 
-        if (markerPosition < 0) return "";
+        while (start < json.length()
+                && Character.isWhitespace(json.charAt(start))) {
+            start++;
+        }
 
-        int colon = candidate.indexOf(':', markerPosition + marker.length());
-        if (colon < 0) return "";
+        if (start >= json.length() || json.charAt(start) != '"') {
+            return "Gemini returned an unexpected response.";
+        }
 
-        int start = candidate.indexOf('"', colon + 1);
-        if (start < 0) return "";
-
+        start++;
         StringBuilder out = new StringBuilder();
         boolean escape = false;
 
-        for (int i = start + 1; i < candidate.length(); i++) {
-            char c = candidate.charAt(i);
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
 
             if (escape) {
                 switch (c) {
@@ -142,17 +110,14 @@ public class AiService {
                     case 't' -> out.append('\t');
                     case 'b' -> out.append('\b');
                     case 'f' -> out.append('\f');
-                    case '"' -> out.append('"');
-                    case '\\' -> out.append('\\');
-                    case '/' -> out.append('/');
                     case 'u' -> {
-                        if (i + 4 < candidate.length()) {
+                        if (i + 4 < json.length()) {
                             try {
                                 out.append((char) Integer.parseInt(
-                                        candidate.substring(i + 1, i + 5), 16));
+                                        json.substring(i + 1, i + 5), 16));
                                 i += 4;
                             } catch (NumberFormatException e) {
-                                return "";
+                                out.append('u');
                             }
                         }
                     }
