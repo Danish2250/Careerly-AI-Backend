@@ -20,7 +20,8 @@ public class AiService {
         String apiKey = System.getenv("GEMINI_API_KEY");
 
         if (apiKey == null || apiKey.isBlank()) {
-            return "Gemini AI is not configured. Please set GEMINI_API_KEY in Render.";
+            System.err.println("GEMINI_API_KEY is missing.");
+            return "Gemini AI is not configured. Please check Render environment variables.";
         }
 
         String safePrompt = prompt == null ? "" : prompt;
@@ -45,12 +46,8 @@ public class AiService {
 
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    
-                        
-
-.uri(URI.create(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
-
+                    .uri(URI.create(
+                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
                     .timeout(Duration.ofSeconds(60))
                     .header("x-goog-api-key", apiKey)
                     .header("Content-Type", "application/json")
@@ -60,14 +57,33 @@ public class AiService {
             HttpResponse<String> response = client.send(
                     request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                return "Gemini AI error (HTTP " + response.statusCode()
-                        + "). Check your API key and Google AI Studio access.";
+            if (response.statusCode() < 200
+                    || response.statusCode() >= 300) {
+
+                System.err.println(
+                        "Gemini HTTP status: " + response.statusCode());
+
+                System.err.println(
+                        "Gemini error response: " + response.body());
+
+                return "Gemini AI error (HTTP "
+                        + response.statusCode()
+                        + "). Check Render Logs for details.";
             }
 
-            return extractText(response.body());
+            String result = extractText(response.body());
+
+            System.out.println("Gemini request completed successfully.");
+            return result;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("Gemini request was interrupted.");
+            return "AI request was interrupted. Please try again.";
 
         } catch (Exception e) {
+            System.err.println(
+                    "Gemini connection error: " + e.getMessage());
             return "Could not connect to Gemini AI. Please try again.";
         }
     }
@@ -78,6 +94,7 @@ public class AiService {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+
         return "\"" + escaped + "\"";
     }
 
@@ -86,6 +103,8 @@ public class AiService {
         int start = json.indexOf(marker);
 
         if (start < 0) {
+            System.err.println(
+                    "Gemini response did not contain a text field.");
             return "Gemini returned a response that could not be read.";
         }
 
@@ -131,7 +150,7 @@ public class AiService {
             } else if (c == '\\') {
                 escape = true;
             } else if (c == '"') {
-                break;
+                return out.toString();
             } else {
                 out.append(c);
             }
