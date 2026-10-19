@@ -17,37 +17,38 @@ public class AiService {
             .build();
 
     public String ask(String prompt) {
+
         String apiKey = System.getenv("GEMINI_API_KEY");
 
         if (apiKey == null || apiKey.isBlank()) {
             System.err.println("GEMINI_API_KEY is missing.");
-            return "Gemini AI is not configured. Please check Render environment variables.";
+            return "Gemini AI is not configured. Check Render environment variables.";
         }
 
         String safePrompt = prompt == null ? "" : prompt;
 
         String body = """
-            {
-              "systemInstruction": {
-                "parts": [{
-                  "text": "You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly career advice. Do not invent job openings or resume facts."
-                }]
-              },
-              "contents": [{
-                "parts": [{
-                  "text": %s
-                }]
-              }],
-              "generationConfig": {
-                "temperature": 0.4
-              }
-            }
-            """.formatted(jsonString(safePrompt));
+                {
+                  "systemInstruction": {
+                    "parts": [{
+                      "text": "You are Careerly.ai, a practical and supportive career coach. Give specific, honest, beginner-friendly career advice. Do not invent job openings or resume facts."
+                    }]
+                  },
+                  "contents": [{
+                    "parts": [{
+                      "text": %s
+                    }]
+                  }],
+                  "generationConfig": {
+                    "temperature": 0.4
+                  }
+                }
+                """.formatted(jsonString(safePrompt));
 
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(
-                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
                     .timeout(Duration.ofSeconds(60))
                     .header("x-goog-api-key", apiKey)
                     .header("Content-Type", "application/json")
@@ -55,7 +56,9 @@ public class AiService {
                     .build();
 
             HttpResponse<String> response = client.send(
-                    request, HttpResponse.BodyHandlers.ofString());
+                    request,
+                    HttpResponse.BodyHandlers.ofString()
+            );
 
             if (response.statusCode() < 200
                     || response.statusCode() >= 300) {
@@ -74,37 +77,66 @@ public class AiService {
             String result = extractText(response.body());
 
             System.out.println("Gemini request completed successfully.");
+
             return result;
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+
             System.err.println("Gemini request was interrupted.");
+
             return "AI request was interrupted. Please try again.";
 
         } catch (Exception e) {
             System.err.println(
                     "Gemini connection error: " + e.getMessage());
+
             return "Could not connect to Gemini AI. Please try again.";
         }
     }
 
     private String jsonString(String value) {
-        String escaped = value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
 
-        return "\"" + escaped + "\"";
+        StringBuilder escaped = new StringBuilder("\"");
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            switch (c) {
+                case '"' -> escaped.append("\\\"");
+                case '\\' -> escaped.append("\\\\");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                case '\b' -> escaped.append("\\b");
+                case '\f' -> escaped.append("\\f");
+
+                default -> {
+                    if (c < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        escaped.append(c);
+                    }
+                }
+            }
+        }
+
+        escaped.append('"');
+
+        return escaped.toString();
     }
 
     private String extractText(String json) {
+
         String marker = "\"text\":";
         int start = json.indexOf(marker);
 
         if (start < 0) {
             System.err.println(
                     "Gemini response did not contain a text field.");
+
+            System.err.println("Gemini response: " + json);
+
             return "Gemini returned a response that could not be read.";
         }
 
@@ -120,6 +152,7 @@ public class AiService {
         }
 
         start++;
+
         StringBuilder out = new StringBuilder();
         boolean escape = false;
 
@@ -133,6 +166,7 @@ public class AiService {
                     case 't' -> out.append('\t');
                     case 'b' -> out.append('\b');
                     case 'f' -> out.append('\f');
+
                     case 'u' -> {
                         if (i + 4 < json.length()) {
                             try {
@@ -144,13 +178,18 @@ public class AiService {
                             }
                         }
                     }
+
                     default -> out.append(c);
                 }
+
                 escape = false;
+
             } else if (c == '\\') {
                 escape = true;
+
             } else if (c == '"') {
                 return out.toString();
+
             } else {
                 out.append(c);
             }
