@@ -43,8 +43,10 @@ public class AiService {
                 """.formatted(jsonString(safePrompt));
 
         
+
 try {
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
+    String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
+
     HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(Duration.ofSeconds(60))
@@ -57,6 +59,7 @@ try {
             request,
             HttpResponse.BodyHandlers.ofString()
     );
+
 
     if (response.statusCode() < 200
             || response.statusCode() >= 300) {
