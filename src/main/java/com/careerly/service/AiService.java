@@ -44,8 +44,7 @@ public class AiService {
 
         
 try {
-    String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
-
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
     HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(Duration.ofSeconds(60))
